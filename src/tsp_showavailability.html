@@ -1,0 +1,394 @@
+
+<html>
+
+<head>
+	<script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@event-calendar/build@3.4.0/event-calendar.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@event-calendar/build@3.4.0/event-calendar.min.js"></script>
+
+    <!-- D365 Context -->
+	<script src="ClientGlobalContext.js.aspx" type="text/javascript" ></script>
+
+    <style>
+        .ec-timeline .ec-time, .ec-timeline .ec-line {
+            width: 80px;
+        }
+    </style>
+</head>
+
+<body style="font-family: 'Segoe UI'">
+    <h2>Search Availability</h2>
+
+    <div class="row">
+        <strong>Appointment Type:</strong>&nbsp;
+        <div id="serviceType"></div>        
+        
+        <div>
+        <strong>Duration:</strong>&nbsp;            
+        <select id="drpAppointmentLength" onchange="appointmentLengthChanged()">
+            <option value="30">30 minutes</option>
+            <option value="45">45 minutes</option>
+            <option value="60" selected>1 hour</option>
+            <option value="90">90 minutes</option>
+            <option value="120">120 minutes</option>
+        </select>        
+        </div>
+        
+    </div>
+
+<hr/>
+
+<div id="ec"></div>
+
+<script type="text/javascript">    
+var resources = [];
+var bookedEvents = [];
+var availableSlots = [];
+var ec;
+
+/* D365 API retrieve resources */
+$(document).ready(function(){
+
+    var serviceActivityDetails = getServiceActivityDetails();
+    
+});
+
+function appointmentLengthChanged()
+{
+    var duration = $('#drpAppointmentLength').val();    
+
+    /* clear the calendar and previous results */ 
+    availableSlots.length = 0;
+    resources.length = 0;
+    bookedEvents.length = 0;
+
+    availableSlots = [];
+    resources = [];
+    bookedEvents = [];
+    
+    ec.destroy();
+
+    getAvailabilitySlots(new Date(), duration);
+}
+
+function getAvailabilitySlots(startdate, duration)
+{
+    var parameters = {};
+    parameters.Version = "3.0"; // Edm.String
+    parameters.IsWebApi = true; // Edm.Boolean
+    //parameters.Requirement = { "@odata.type": "Microsoft.Dynamics.CRM.serviceappointment", activityid : "02d492fa-fd4a-ef11-a317-0022481e011e" }; // mscrm.crmbaseentity
+    parameters.Settings = { "ConsiderSlotsWithProposedBookings": false, "MovePastStartDateToCurrentDate": true, "@odata.type": "Microsoft.Dynamics.CRM.expando", "ConsiderAppointments": true}; 
+
+    parameters.Requirement = {
+            "msdyn_fromdate": getTodaysDate() + "T00:00:00Z",
+            "msdyn_todate": getTodaysDatePlusOneWeek() + "T23:59:00Z",
+            "msdyn_remainingduration": duration,
+            "msdyn_duration": duration,
+            "@odata.type": "Microsoft.Dynamics.CRM.msdyn_resourcerequirement"
+    }
+
+    console.log('Now retrieving availability slots for duration of ' + duration);
+
+    /* call the Search Resource Availability API which will return availability slots */ 
+    $.ajax({
+        type: "POST",
+        url: Xrm.Utility.getGlobalContext().getClientUrl() + "/api/data/v9.2/msdyn_SearchResourceAvailability",
+        async: true,
+        headers: {
+            "OData-MaxVersion": "4.0",
+            "OData-Version": "4.0",
+            "Content-Type": "application/json; charset=utf-8",
+            "Accept": "application/json"
+        },
+        data: JSON.stringify(parameters),
+        success: function (data, textStatus, xhr) {
+            var result = data;
+            console.log(result);
+            // Return Type: mscrm.msdyn_SearchResourceAvailabilityResponse
+            // Output Parameters
+            var timeslots = result["TimeSlots"]; // Collection(mscrm.crmbaseentity)
+            var resources = result["Resources"]; // Collection(mscrm.crmbaseentity)
+            var related = result["Related"]; // mscrm.crmbaseentity
+            var exceptions = result["Exceptions"]; // mscrm.crmbaseentity
+
+            for(var i = 0; i < timeslots.length; i++)
+            {
+                if(timeslots[i].Potential === true)
+                {
+                    //console.log(timeslots[i]);
+                    var starttime = timeslots[i].StartTime;
+                    var endtime = timeslots[i].EndTime;
+                    var resourceId = timeslots[i].Resource.Resource.bookableresource;
+                    var availableSlot = { start: getFormattedDate(starttime), end: getFormattedDate(endtime), resourceId: resourceId, title: 'Free', selectable: true, durationEditable: false, resourceEditable: false, startEditable: false, color: "#ADD8E6" };
+                    availableSlots.push(availableSlot);
+                }
+                //else{
+                    //console.log("timeslots[i].Potential: " + timeslots[i].Potential);
+                //}
+            }
+
+            getExistingBookings();
+        },
+        error: function (xhr, textStatus, errorThrown) {
+            console.log(xhr);
+        }
+    });
+}
+
+function getParameterByName(name, url = window.location.href) {
+    name = name.replace(/[\[\]]/g, '\\$&');
+    var regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)'),
+        results = regex.exec(url);
+    if (!results) return null;
+    if (!results[2]) return '';
+    return decodeURIComponent(results[2].replace(/\+/g, ' '));
+}
+
+function getServiceActivityDetails()
+{
+    
+    var serviceActivityId = getParameterByName('data'); // guid
+
+    if(serviceActivityId != null)
+    {
+
+        console.log('serviceactivityId: ' + serviceActivityId);
+
+        $.ajax({
+            type: "GET",
+            url: Xrm.Utility.getGlobalContext().getClientUrl() + "/api/data/v9.2/serviceappointments(" + serviceActivityId + ")",
+            headers: {
+                "OData-MaxVersion": "4.0",
+                "OData-Version": "4.0",
+                "Content-Type": "application/json; charset=utf-8",
+                "Accept": "application/json",
+                "Prefer": "odata.include-annotations=*"
+            },
+            async: true,
+            success: function (data, textStatus, xhr) {
+                var result = data;
+                console.log(result);
+                // Columns
+                var activityid = result["activityid"]; // Guid
+                var serviceDescription = result["_serviceid_value@OData.Community.Display.V1.FormattedValue"];
+                
+                console.log('activityid: ' + activityid);
+                console.log('serviceDescription: ' + serviceDescription);
+
+                $('#serviceType')[0].innerHTML = serviceDescription;
+
+                getAvailabilitySlots(new Date(), 60); // initial 60 minute slot search
+            },
+            error: function (xhr, textStatus, errorThrown) {
+                console.log(xhr);
+        }
+        });
+    }
+    else
+    {
+        $('#serviceType')[0].innerHTML = "Service Activity Not Found, Pass via data querystring parameter";
+        getAvailabilitySlots(new Date(), 60);
+    }
+}
+
+function getExistingBookings()
+{
+	$.ajax({
+		type: "GET",
+		url: Xrm.Utility.getGlobalContext().getClientUrl() + "/api/data/v9.2/bookableresources?$select=bookableresourceid,_accountid_value,_calendarid_value,_contactid_value,name,msdyn_primaryemail,resourcetype,_userid_value&$filter=(statecode eq 0 and msdyn_displayonscheduleboard eq true)&$orderby=name asc",
+		async: true,
+		headers: {
+			"OData-MaxVersion": "4.0",
+			"OData-Version": "4.0",
+			"Content-Type": "application/json; charset=utf-8",
+			"Accept": "application/json",
+			"Prefer": "odata.include-annotations=*"
+		},
+		success: function (data, textStatus, xhr) {
+			var results = data;
+			console.log(results);
+			for (var i = 0; i < results.value.length; i++) {
+				var result = results.value[i];
+				// Columns - this could be reduced to just what is needed, also shorten the "select=" in the query above for better performance
+				var bookableresourceid = result["bookableresourceid"]; // Guid
+				var accountid = result["_accountid_value"]; // Lookup
+				var accountid_formatted = result["_accountid_value@OData.Community.Display.V1.FormattedValue"];
+				var accountid_lookuplogicalname = result["_accountid_value@Microsoft.Dynamics.CRM.lookuplogicalname"];
+				var calendarid = result["_calendarid_value"]; // Lookup
+				var calendarid_formatted = result["_calendarid_value@OData.Community.Display.V1.FormattedValue"];
+				var calendarid_lookuplogicalname = result["_calendarid_value@Microsoft.Dynamics.CRM.lookuplogicalname"];
+				var contactid = result["_contactid_value"]; // Lookup
+				var contactid_formatted = result["_contactid_value@OData.Community.Display.V1.FormattedValue"];
+				var contactid_lookuplogicalname = result["_contactid_value@Microsoft.Dynamics.CRM.lookuplogicalname"];
+				var name = result["name"]; // Text
+				var msdyn_primaryemail = result["msdyn_primaryemail"]; // Text
+				var resourcetype = result["resourcetype"]; // Choice
+				var resourcetype_formatted = result["resourcetype@OData.Community.Display.V1.FormattedValue"];
+				var userid = result["_userid_value"]; // Lookup
+				var userid_formatted = result["_userid_value@OData.Community.Display.V1.FormattedValue"];
+				var userid_lookuplogicalname = result["_userid_value@Microsoft.Dynamics.CRM.lookuplogicalname"];
+
+				var resource = {id: bookableresourceid, title: name };
+				resources.push(resource);
+
+			}			
+			getBookableResources();
+		},
+		error: function (xhr, textStatus, errorThrown) {
+			console.log(xhr);
+		}
+	});
+};
+
+
+	/* D365 API retrieve bookable resource bookings */
+
+	function getBookableResources()
+	{
+
+        $.ajax({
+            type: "GET",
+            url: Xrm.Utility.getGlobalContext().getClientUrl() + "/api/data/v9.2/bookableresourcebookings?$select=bookableresourcebookingid,_bookingstatus_value,bookingtype,duration,endtime,name,_resource_value,starttime&$filter=(statecode eq 0 and Microsoft.Dynamics.CRM.NextXWeeks(PropertyName='starttime',PropertyValue=2))&$orderby=starttime asc",
+            async: true,
+            headers: {
+                "OData-MaxVersion": "4.0",
+                "OData-Version": "4.0",
+                "Content-Type": "application/json; charset=utf-8",
+                "Accept": "application/json",
+                "Prefer": "odata.include-annotations=*"
+            },
+            success: function (data, textStatus, xhr) {
+                var results = data;
+                console.log(results);
+                for (var i = 0; i < results.value.length; i++) {
+                    var result = results.value[i];
+                    // Columns
+                    var bookableresourcebookingid = result["bookableresourcebookingid"]; // Guid
+                    var bookingstatus = result["_bookingstatus_value"]; // Lookup
+                    var bookingstatus_formatted = result["_bookingstatus_value@OData.Community.Display.V1.FormattedValue"];
+                    var bookingstatus_lookuplogicalname = result["_bookingstatus_value@Microsoft.Dynamics.CRM.lookuplogicalname"];
+                    var bookingtype = result["bookingtype"]; // Choice
+                    var bookingtype_formatted = result["bookingtype@OData.Community.Display.V1.FormattedValue"];
+                    var duration = result["duration"]; // Whole Number
+                    var duration_formatted = result["duration@OData.Community.Display.V1.FormattedValue"];
+                    var endtime = result["endtime"]; // Date Time
+                    var endtime_formatted = result["endtime@OData.Community.Display.V1.FormattedValue"];
+                    var name = result["name"]; // Text
+                    var resource = result["_resource_value"]; // Lookup
+                    var resource_formatted = result["_resource_value@OData.Community.Display.V1.FormattedValue"];
+                    var resource_lookuplogicalname = result["_resource_value@Microsoft.Dynamics.CRM.lookuplogicalname"];
+                    var starttime = result["starttime"]; // Date Time
+                    var starttime_formatted = result["starttime@OData.Community.Display.V1.FormattedValue"];
+
+                    var bookedEvent = { start: getFormattedDate(starttime), end: getFormattedDate(endtime), resourceId: resource, title: name, durationEditable: false, resourceEditable: true, startEditable: true };
+                    bookedEvents.push(bookedEvent);
+                }
+                renderCalendar();
+            },
+            error: function (xhr, textStatus, errorThrown) {
+                console.log(xhr);
+            }
+        });
+
+	}
+
+	function renderCalendar()
+	{
+		/***************************************/
+		ec = new EventCalendar(document.getElementById('ec'), {
+			timeZone: 'UTC',
+			view: 'resourceTimeGridDay',
+			headerToolbar: {
+					start: 'prev,next today',
+					center: 'title',
+                    end: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek,resourceTimeGridDay,resourceTimelineWeek'
+				},
+				scrollTime: (_pad(new Date().getHours()) + ":" + _pad(new Date().getMinutes()) + ':00'), // current system time
+				slotMinTime: '08:00',
+				slotMaxTime: '18:00',
+				nowIndicator: true,
+				selectable: true,				
+				firstDay: new Date().getDay(),
+				dateClick: function(info) {
+                    console.log(info);
+					console.log('Clicked on: ' + info.dateStr);
+					console.log('Coordinates: ' + info.jsEvent.pageX + ',' + info.jsEvent.pageY);
+					console.log('Current view: ' + info.view.type);
+					// change the day's background color just for fun
+					//info.dayEl.style.backgroundColor = 'red';
+				},
+                eventClick: function(info) {
+                    console.log(info);
+					console.log('Clicked on: ' + info.el);
+					//console.log('Event: ' + info.event);
+                    console.log('Event.start: ' + info.event.start);
+                    console.log('Event.end: ' + info.event.end);
+                    console.log('Event.resourceIds: ' + info.event.resourceIds[0]);
+
+				},
+				slotWidth: 80,
+				nowIndicator: true,
+				pointer: true,
+				events: createEvents(),
+				resources:  createResources()
+		});	
+	};
+
+
+    function createAvailableSlots()
+    {
+        console.log("Inside: " + createAvailableSlots);
+        console.log(availableSlots);
+        return availableSlots;
+    }
+
+    function createEvents()
+    {
+        // return slots and known events
+        return bookedEvents.concat(availableSlots);
+    }
+
+
+    function getTodaysDate()
+    {
+        var day = new Date();
+        var dateOnly = day.getFullYear() + "-" + _pad(day.getMonth()+1) + "-" + _pad(day.getDate());
+        return dateOnly;
+    }
+
+    function getTodaysDatePlusOneWeek()
+    {
+        var day = new Date().addDays(7);
+        var dateOnly = day.getFullYear() + "-" + _pad(day.getMonth()+1) + "-" + _pad(day.getDate());
+        return dateOnly;
+    }
+
+    function getFormattedDate(theDate)
+    {
+        var day = new Date(theDate);	
+        var formattedDate = day.getFullYear() + "-" + _pad(day.getMonth()+1) + "-" + _pad(day.getDate()) + " " + _pad(day.getHours()) + ":" + _pad(day.getMinutes());
+        return formattedDate;
+    }
+
+    function createResources()
+    {
+        console.log(resources);
+        return resources; 
+    }
+
+
+    function _pad(num) 
+    {
+        let norm = Math.floor(Math.abs(num));
+        return (norm < 10 ? '0' : '') + norm;
+    }
+
+    Date.prototype.addDays = function(days) {
+    var date = new Date(this.valueOf());
+    date.setDate(date.getDate() + days);
+    return date;
+}
+</script>
+</body>
+</html>

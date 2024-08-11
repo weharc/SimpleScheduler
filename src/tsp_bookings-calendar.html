@@ -1,0 +1,246 @@
+
+<html>
+
+<head>
+	<script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@event-calendar/build@3.4.0/event-calendar.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@event-calendar/build@3.4.0/event-calendar.min.js"></script>
+
+	<script src="ClientGlobalContext.js.aspx" type="text/javascript" ></script>
+
+    <style>
+        .ec-timeline .ec-time, .ec-timeline .ec-line {
+            width: 80px;
+        }
+    </style>
+
+</head>
+
+<body style="font-family: 'Segoe UI'">
+
+<div id="ec"></div>
+
+<script type="text/javascript">    
+
+var resources = [];
+var bookedEvents = [];
+
+/* D365 API retrieve resources */
+$(document).ready(function(){
+
+	$.ajax({
+		type: "GET",
+		url: Xrm.Utility.getGlobalContext().getClientUrl() + "/api/data/v9.2/bookableresources?$select=bookableresourceid,_accountid_value,_calendarid_value,_contactid_value,name,msdyn_primaryemail,resourcetype,_userid_value&$filter=(statecode eq 0 and msdyn_displayonscheduleboard eq true)&$orderby=name asc",
+		async: true,
+		headers: {
+			"OData-MaxVersion": "4.0",
+			"OData-Version": "4.0",
+			"Content-Type": "application/json; charset=utf-8",
+			"Accept": "application/json",
+			"Prefer": "odata.include-annotations=*"
+		},
+		success: function (data, textStatus, xhr) {
+			var results = data;
+			console.log(results);
+			for (var i = 0; i < results.value.length; i++) {
+				var result = results.value[i];
+				// Columns
+				var bookableresourceid = result["bookableresourceid"]; // Guid
+				var accountid = result["_accountid_value"]; // Lookup
+				var accountid_formatted = result["_accountid_value@OData.Community.Display.V1.FormattedValue"];
+				var accountid_lookuplogicalname = result["_accountid_value@Microsoft.Dynamics.CRM.lookuplogicalname"];
+				var calendarid = result["_calendarid_value"]; // Lookup
+				var calendarid_formatted = result["_calendarid_value@OData.Community.Display.V1.FormattedValue"];
+				var calendarid_lookuplogicalname = result["_calendarid_value@Microsoft.Dynamics.CRM.lookuplogicalname"];
+				var contactid = result["_contactid_value"]; // Lookup
+				var contactid_formatted = result["_contactid_value@OData.Community.Display.V1.FormattedValue"];
+				var contactid_lookuplogicalname = result["_contactid_value@Microsoft.Dynamics.CRM.lookuplogicalname"];
+				var name = result["name"]; // Text
+				var msdyn_primaryemail = result["msdyn_primaryemail"]; // Text
+				var resourcetype = result["resourcetype"]; // Choice
+				var resourcetype_formatted = result["resourcetype@OData.Community.Display.V1.FormattedValue"];
+				var userid = result["_userid_value"]; // Lookup
+				var userid_formatted = result["_userid_value@OData.Community.Display.V1.FormattedValue"];
+				var userid_lookuplogicalname = result["_userid_value@Microsoft.Dynamics.CRM.lookuplogicalname"];
+
+				var resource = {id: bookableresourceid, title: name,  businessHours: {
+        startTime: '11:00',
+        endTime: '17:00',
+        daysOfWeek: [ 1, 3, 5 ] // Mon,Wed,Fri
+      }};
+				resources.push(resource);
+
+			}			
+			getBookableResources();
+		},
+		error: function (xhr, textStatus, errorThrown) {
+			console.log(xhr);
+		}
+	});
+}
+);
+
+
+	/* D365 API retrieve bookable resource bookings */
+
+	function getBookableResources()
+	{
+
+	$.ajax({
+		type: "GET",
+		url: Xrm.Utility.getGlobalContext().getClientUrl() + "/api/data/v9.2/bookableresourcebookings?$select=bookableresourcebookingid,_bookingstatus_value,bookingtype,duration,endtime,name,_resource_value,starttime&$filter=(statecode eq 0 and Microsoft.Dynamics.CRM.NextXWeeks(PropertyName='starttime',PropertyValue=2))&$orderby=starttime asc",
+		async: true,
+		headers: {
+			"OData-MaxVersion": "4.0",
+			"OData-Version": "4.0",
+			"Content-Type": "application/json; charset=utf-8",
+			"Accept": "application/json",
+			"Prefer": "odata.include-annotations=*"
+		},
+		success: function (data, textStatus, xhr) {
+			var results = data;
+			console.log(results);
+			for (var i = 0; i < results.value.length; i++) {
+				var result = results.value[i];
+				// Columns
+				var bookableresourcebookingid = result["bookableresourcebookingid"]; // Guid
+				var bookingstatus = result["_bookingstatus_value"]; // Lookup
+				var bookingstatus_formatted = result["_bookingstatus_value@OData.Community.Display.V1.FormattedValue"];
+				var bookingstatus_lookuplogicalname = result["_bookingstatus_value@Microsoft.Dynamics.CRM.lookuplogicalname"];
+				var bookingtype = result["bookingtype"]; // Choice
+				var bookingtype_formatted = result["bookingtype@OData.Community.Display.V1.FormattedValue"];
+				var duration = result["duration"]; // Whole Number
+				var duration_formatted = result["duration@OData.Community.Display.V1.FormattedValue"];
+				var endtime = result["endtime"]; // Date Time
+				var endtime_formatted = result["endtime@OData.Community.Display.V1.FormattedValue"];
+				var name = result["name"]; // Text
+				var resource = result["_resource_value"]; // Lookup
+				var resource_formatted = result["_resource_value@OData.Community.Display.V1.FormattedValue"];
+				var resource_lookuplogicalname = result["_resource_value@Microsoft.Dynamics.CRM.lookuplogicalname"];
+				var starttime = result["starttime"]; // Date Time
+				var starttime_formatted = result["starttime@OData.Community.Display.V1.FormattedValue"];
+
+				var bookedEvent = { start: getFormattedDate(starttime), end: getFormattedDate(endtime), resourceId: resource, title: name, durationEditable: false, resourceEditable: true, startEditable: true };
+				bookedEvents.push(bookedEvent);
+			}
+			renderCalendar();
+		},
+		error: function (xhr, textStatus, errorThrown) {
+			console.log(xhr);
+		}
+	});
+
+	}
+	function renderCalendar()
+	{
+		/***************************************/
+		let ec = new EventCalendar(document.getElementById('ec'), {
+			timeZone: 'UTC',
+			view: 'resourceTimelineWeek',
+			headerToolbar: {
+					start: 'prev,next today',
+					center: 'title',
+					end: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek resourceTimeGridWeek,resourceTimelineWeek'
+				},
+				scrollTime: '08:00:00',
+				slotMinTime: '08:00',
+				slotMaxTime: '18:00',
+				nowIndicator: true,
+				selectable: true,				
+				weekends: false,
+				firstDay: new Date().getDay(),
+				dateClick: function(info) {
+					console.log('Clicked on: ' + info.dateStr);
+					console.log('Coordinates: ' + info.jsEvent.pageX + ',' + info.jsEvent.pageY);
+					console.log('Current view: ' + info.view.type);
+					// change the day's background color just for fun
+					//info.dayEl.style.backgroundColor = 'red';
+				},
+				slotWidth: 80,
+				nowIndicator: true,
+				pointer: true,
+				events: createEvents(),
+				resources:  createResources()
+		});	
+	}
+
+
+function helloWorld(info)
+{
+	console.log(info);
+//	alert('Hello world');
+	alert('Date: ' + info.dateStr);
+    alert('Resource ID: ' + info.resource.id);
+}
+
+function createEvents()
+{
+
+	console.log(bookedEvents);
+	// sample data:	
+	bookedEvents.push({start: getTodaysDate() + " 14:00", end: getTodaysDate() + " 14:45", resourceId: "56785c44-ea7c-ee11-8179-000d3a9a808c", title:"Manually added for timezone"})
+	bookedEvents.push({start: getTodaysDate() + " 16:00", end: getTodaysDate() + " 16:45", resourceId: "56785c44-ea7c-ee11-8179-000d3a9a808c", title:"Sample", color: "#B29DD9"})
+	return bookedEvents;
+
+	/*
+    let days = [];
+        for (let i = 0; i < 7; ++i) {
+            let day = new Date();
+            let diff = i - day.getDay();
+            day.setDate(day.getDate() + diff);
+            days[i] = day.getFullYear() + "-" + _pad(day.getMonth()+1) + "-" + _pad(day.getDate());
+        }
+
+        return [
+            {start: days[0] + " 00:00", end: days[0] + " 09:00", resourceId: 1, display: "background"},
+            {start: days[1] + " 12:00", end: days[1] + " 14:00", resourceId: 2, display: "background"},
+            {start: days[2] + " 17:00", end: days[2] + " 24:00", resourceId: 1, display: "background"},
+            {start: days[0] + " 10:00", end: days[0] + " 14:00", resourceId: 1, title: "The calendar can display background and regular events", color: "#FE6B64"},
+            {start: days[1] + " 16:00", end: days[2] + " 08:00", resourceId: 2, title: "An event may span to another day", color: "#B29DD9"},
+            {start: days[2] + " 09:00", end: days[2] + " 13:00", resourceId: 2, title: "Events can be assigned to resources and the calendar has the resources view built-in", color: "#779ECB"},
+            {start: days[3] + " 14:00", end: days[3] + " 20:00", resourceId: 1, title: "", color: "#FE6B64"},
+            {start: days[3] + " 15:00", end: days[3] + " 18:00", resourceId: 1, title: "Overlapping events are positioned properly", color: "#779ECB"},
+            {start: days[5] + " 10:00", end: days[5] + " 16:00", resourceId: 2, title: {html: "You have complete control over the <i><b>display</b></i> of events…"}, color: "#779ECB"},
+            {start: days[5] + " 14:00", end: days[5] + " 19:00", resourceId: 2, title: "…and you can drag and drop the events!", color: "#FE6B64"},
+            {start: days[5] + " 18:00", end: days[5] + " 21:00", resourceId: 2, title: "", color: "#B29DD9"},
+            {start: days[1], end: days[3], resourceId: 1, title: "All-day events can be displayed at the top", color: "#B29DD9", allDay: true}
+        ];
+
+		*/
+}
+
+
+function getTodaysDate()
+{
+	var day = new Date();
+	var dateOnly = day.getFullYear() + "-" + _pad(day.getMonth()+1) + "-" + _pad(day.getDate());
+	return dateOnly;
+}
+
+function getFormattedDate(theDate)
+{
+	var day = new Date(theDate);	
+	var formattedDate = day.getFullYear() + "-" + _pad(day.getMonth()+1) + "-" + _pad(day.getDate()) + " " + _pad(day.getHours()) + ":" + _pad(day.getMinutes());
+	return formattedDate;
+}
+
+function createResources()
+{
+	console.log(resources);
+	return resources; 
+}
+
+
+function _pad(num) 
+{
+        let norm = Math.floor(Math.abs(num));
+        return (norm < 10 ? '0' : '') + norm;
+}
+
+</script>
+
+
+</body>
+</html>
+
